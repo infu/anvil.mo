@@ -6,7 +6,7 @@ Assuming you have vessel package manager initialized.
 
         let additions = [
         { name = "anvil"
-        , repo = "https://github.com/vvv-interactive/anvil.mo"
+        , repo = "https://github.com/infu/anvil.mo"
         , version = "v0.1.2"
         , dependencies = ["base"]
         },
