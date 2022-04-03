@@ -1,6 +1,7 @@
 import Time "mo:base/Time";
 import Cluster  "../type/Cluster";
-
+import Nft "../type/nft_interface";
+import History "../type/history_interface";
 
 module {
 
@@ -23,6 +24,19 @@ module {
             oracle := b;
             lastUpdate := Time.now() + TIME_BETWEEN_UPDATES;
         };
+
+        public func getTransaction (tx: Nft.TransactionId) : async ?Nft.Transaction {
+            if (needsUpdate()) await update();
+
+            // 1. decode tx
+            let {history_slot; idx} = Nft.TransactionId.decode(tx);
+
+            // 2. check if history canister is from cluster
+            assert(Nft.APrincipal.isLegitimateSlot(conf.space, history_slot));
+
+            // 3. query tx details
+            await Cluster.history(conf).get(idx);
+        }
 
     }
 
