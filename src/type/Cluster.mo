@@ -103,7 +103,7 @@ module {
         actor(Principal.toText(Nft.APrincipal.fromSlot(conf.space, slot))) : Account.Interface;
     };
 
-    public func nftFromTid(conf : Config, tid : Nft.TokenIdentifier) {
+    public func nftFromTid(conf : Config, tid : Nft.TokenIdentifier) : Nft.Interface {
         let (slot, _) = Nft.TokenIdentifier.decode(tid);
         actor (Principal.toText(Nft.APrincipal.fromSlot(conf.space, slot))) : Nft.Interface;
     };
