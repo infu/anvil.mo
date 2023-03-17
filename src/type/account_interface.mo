@@ -5,6 +5,7 @@ import Nat32 "mo:base/Nat32";
 import Nat64 "mo:base/Nat64";
 import Nat16 "mo:base/Nat16";
 import Inventory "../lib/Inventory";
+import Map "../lib/zh/Map";
 
 module {
      
@@ -15,7 +16,6 @@ module {
           add_transaction : shared (aid: Nft.AccountIdentifier, tx: Nft.TransactionId) -> async ();
           meta : query (aid: Nft.AccountIdentifier) -> async ?AccountMeta;
           list : query (aid: Nft.AccountIdentifier, from:Nat, to:Nat) -> async [Nft.TokenIdentifier];
-
      };
 
      public type AccountMeta = {
@@ -32,8 +32,6 @@ module {
 
      public type TokenIdentifier = Nft.TokenIdentifier;
      
-   
-   
      public type AccountRecord = {
           tokens : Inventory.Inventory;
           var info : ?AddressInfo;
@@ -71,5 +69,35 @@ module {
           }
      };
     
+     public type ContainerId = Nat;
 
+     public type ContainerStore = Map.Map<ContainerId, Container>;
+
+     public type Container = {
+          var unlocked : Bool;
+          tokens: [ContainerToken];
+          requirements: [ContainerToken];
+          verifications: [var Bool];
+          };
+
+     public type ContainerPublic = {
+          unlocked : Bool;
+          tokens: [ContainerToken];
+          requirements: [ContainerToken];
+          verifications: [Bool];
+          };
+
+     public type ContainerToken = {
+          #nft: CNFT;
+          #ft: CFT;
+     };
+
+     public type CNFT = {
+          id : Nat64;
+     };
+
+     public type CFT = {
+          id : Nat64;
+          balance: Nft.Balance;
+     };
 }

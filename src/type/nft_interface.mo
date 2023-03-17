@@ -178,6 +178,16 @@ module {
         public type SubAccount = Blob; //32 bytes
 
         public module SubAccount = {
+            public func fromPrincipal(p: Principal) : Blob { // the format used by IC services like CNC
+                let pa = Blob.toArray(Principal.toBlob(p));
+                let pa_size = pa.size();
+                Blob.fromArray(Array.tabulate<Nat8>(32, func (idx) {
+                    if (idx == 0) return Nat8.fromNat(pa_size);
+                    if (idx <= pa_size) return pa[idx-1];
+                    return 0;
+                }));
+            };
+
             public func fromNat(idx: Nat) : SubAccount {
                 Blob.fromArray(_Array.concat<Nat8>(
                     Array.freeze(Array.init<Nat8>(24, 0)),
@@ -272,6 +282,7 @@ module {
         pwr: CanisterRange;
         anvil: CanisterSlot;
         treasury: CanisterSlot;
+        tokenregistry: CanisterSlot;
         history: CanisterSlot;
         history_range: CanisterRange;
         space:[[Nat64]];
@@ -355,6 +366,8 @@ module {
         unplug      : shared (request: UnsocketRequest) -> async UnplugResponse;
     };
     // Balance refers to an amount of a particular token.
+
+    public type FTokenId = Nat64;
     public type Balance = Nat64;
 
     public type CustomId = Nat64;
@@ -551,6 +564,8 @@ module {
 
     public type PurchaseRequest = {
         token : TokenIdentifier;
+        payment_token: FTokenId;
+        payment_token_kind: {#normal; #fractionless};
         user : User;
         subaccount: ?SubAccount;
         amount: Balance;
@@ -609,7 +624,7 @@ module {
         CommonError
     >;
 
-    public type UploadChunkRequest =  {
+    public type UploadChunkRequest = {
         subaccount : ?SubAccount;
         tokenIndex: TokenIndex;
         position : {#content; #thumb};
@@ -617,7 +632,7 @@ module {
         data : Blob;
     };
 
-    public type FetchChunkRequest =  {
+    public type FetchChunkRequest = {
         tokenIndex: TokenIndex;
         position : {#content; #thumb};
         chunkIdx : Nat32;
@@ -734,12 +749,7 @@ module {
 
     //)
 
-
-
-  
-
-
-   
+ 
     //(TokenIndex
     // Represents an individual token's index within a given canister.
     public type TokenIndex = Nat16;
@@ -764,7 +774,7 @@ module {
 
     public type ContentType = Text;
     public module ContentType = {
-        public let Allowed:[ContentType] = ["application/octet-stream","image/jpeg","image/gif","image/png","video/ogg","video/mpeg","video/mp4","video/webm","image/webp","audio/mpeg","audio/aac","audio/ogg","audio/opus","audio/webm","image/svg+xml"]; // Warning: Allowing other types shoud go trough security check
+        public let Allowed:[ContentType] = ["application/octet-stream","application/wasm","application/pdf","text/plain","text/markdown","application/json","application/blast","image/jpeg","image/gif","image/png","image/apng","video/ogg","video/mpeg","video/mp4","video/webm","image/webp","audio/mpeg","audio/aac","audio/ogg","audio/opus","audio/webm","image/svg+xml"]; // Warning: Allowing other types shoud go trough security check
         public func validate(t : ContentType) : Bool {
             switch(Array.find(Allowed, func (a : ContentType) : Bool { a == t })) {
                 case (?x) true;
@@ -878,7 +888,7 @@ module {
         custom: ?CustomData;
         customVar: ?CustomVar;
         authorShare: Share;
-        price: Price;
+        // price: Price;
         rechargeable: Bool;
     };
 
@@ -1173,38 +1183,44 @@ module {
         switch(v) { case (?z) f(z); case(null) true }
     };
 
+
+
     public type Price = {
         amount : Nat64;
+//        token : FTokenId;   // BREAKING UPGRADE
         marketplace : ?{
                 address : AccountIdentifier;
                 share : Share 
                 };
-     };
+    };
 
     public module Price = {
         public func NotForSale() : Price {
             {
                 amount = 0;
                 marketplace = null;
+ //               token = 0;
                 // affiliate = null;
             }
         };
 
         public func hash(x: Price) : [Nat8] {
-            _Array.concat<Nat8>(
+            Array.flatten<Nat8>([
                     Blob_.nat64ToBytes(x.amount),
                     switch(x.marketplace) {
                         case (?{address; share}) {
-                            _Array.concat<Nat8>(
+                            Array.flatten<Nat8>([
                                 Blob.toArray(address),
-                                Blob_.nat16ToBytes(share)
+                                Blob_.nat16ToBytes(share),
+                              //  Blob_.nat64ToBytes(x.token)
+                              ]
                             )
                         };
                         case (null) {
                             []
                         }
                     }
-                )
+                ])
         };
     };
     //)
@@ -1259,6 +1275,9 @@ module {
                 case (#nft(x)) NftEvent.hash(x);
                 case (#pwr(x)) PwrEvent.hash(x);
                 case (#anv(x)) AnvEvent.hash(x);
+                case (#ft(x)) FtEvent.hash(x);
+                case (#dex(x)) DexEvent.hash(x);
+
                 case (#treasury(x)) [];
             };
         }
@@ -1268,11 +1287,112 @@ module {
         #nft : NftEvent;
         #pwr : PwrEvent;
         #anv : AnvEvent;
+        #ft : FtEvent;
+        #dex : DexEvent;
     };
 
     public type AnvEvent = {
         #transfer : EventFungibleTransaction;
         // vote
+    };
+
+    public type DexEvent = {
+        #create_pool : DexCreatePool;
+        #add_liquidity : DexAddLiquidity;
+        #rem_liquidity : DexRemLiquidity;
+        #swap : DexSwap;
+    };
+
+    public module DexEvent = {
+        public func hash(e : DexEvent) : [Nat8] {
+             switch (e) {
+                case (#create_pool({created;user;token_one;token_two;cost})) {
+                    Array.flatten<Nat8>([
+                        [1:Nat8],
+                        Blob_.intToBytes(created),
+                        Blob.toArray(user),
+                        Blob_.nat64ToBytes(cost),
+                        Blob_.nat64ToBytes(token_one),
+                        Blob_.nat64ToBytes(token_two),
+                    ])
+                };
+                case (#add_liquidity({created;user;token_one;token_two;token_one_amount;token_two_amount})) {
+                    Array.flatten<Nat8>([
+                        [2:Nat8],
+                        Blob_.intToBytes(created),
+                        Blob.toArray(user),
+                        Blob_.nat64ToBytes(token_one_amount),
+                        Blob_.nat64ToBytes(token_two_amount),
+                        Blob_.nat64ToBytes(token_one),
+                        Blob_.nat64ToBytes(token_two),
+                    ])
+                };
+                case (#rem_liquidity({created;user;token_one;token_two;token_one_amount;token_two_amount})) {
+                    Array.flatten<Nat8>([
+                        [3:Nat8],
+                        Blob_.intToBytes(created),
+                        Blob.toArray(user),
+                        Blob_.nat64ToBytes(token_one_amount),
+                        Blob_.nat64ToBytes(token_two_amount),
+                        Blob_.nat64ToBytes(token_one),
+                        Blob_.nat64ToBytes(token_two),
+                    ])
+                };
+                case (#swap({created;user;token_one;token_two;amount;amount_recieved})) {
+                    Array.flatten<Nat8>([
+                        [4:Nat8],
+                        Blob_.intToBytes(created),
+                        Blob.toArray(user),
+                        Blob_.nat64ToBytes(amount),
+                        Blob_.nat64ToBytes(amount_recieved),
+                        Blob_.nat64ToBytes(token_one),
+                        Blob_.nat64ToBytes(token_two),
+                    ])
+                };
+             }
+        }
+    };
+
+    public type DexCreatePool = {
+        created: Timestamp;
+        user: AccountIdentifier;
+        token_one : FTokenId;
+        token_two : FTokenId;
+        cost: Balance;
+    };
+    public type DexAddLiquidity = {
+        created: Timestamp;
+        user: AccountIdentifier;
+        token_one : FTokenId;
+        token_two : FTokenId;
+        token_one_amount: Balance;
+        token_two_amount: Balance;
+    };
+    public type DexRemLiquidity = {
+        created: Timestamp;
+        user: AccountIdentifier;
+        token_one : FTokenId;
+        token_two : FTokenId;
+        token_one_amount: Balance;
+        token_two_amount: Balance;
+    };
+    public type DexSwap = {
+        created: Timestamp;
+        user: AccountIdentifier;
+        token_one : FTokenId;
+        token_two : FTokenId;
+        amount: Balance;
+        amount_recieved: Balance;
+        reverse: Bool;
+    };
+    
+    public type FtEvent = {
+        #transfer : FtTransaction;
+        #mint : FtMint;
+        #burn : FtBurn;
+        #register : FtRegister;
+        #promote: EventPromote;
+
     };
 
     public type PwrEvent = {
@@ -1360,6 +1480,7 @@ module {
                         Blob.toArray(memo)
                     ])
                 };
+               
              }
         }
     };
@@ -1430,16 +1551,16 @@ module {
                         Blob.toArray(memo)
                     ])
                 };
-                case (#price({created;user;token;price})) {
+                case (#price({created;user;price})) { //token;
                     Array.flatten<Nat8>([
                         [5:Nat8],
                         Blob_.intToBytes(created),
                         Blob.toArray(user),
-                        Blob_.nat64ToBytes(token),
+                        // Blob_.nat64ToBytes(token),
                         Price.hash(price)
                     ])
                 };
-                case (#mint({created;token;pwr;user})) {  
+                case (#mint({created;token;pwr;user})) {
                     Array.flatten<Nat8>([
                         [6:Nat8],
                         Blob_.intToBytes(created),
@@ -1495,7 +1616,7 @@ module {
                             [9:Nat8],
                             Blob_.intToBytes(e.created),
                             Blob_.nat64ToBytes(e.amount),
-                            Blob_.nat64ToBytes(e.token),
+                            // Blob_.nat64ToBytes(e.token),
                             Blob.toArray(e.buyer),
                             Blob.toArray(e.seller),
                             Blob.toArray(e.author.address),
@@ -1540,6 +1661,108 @@ module {
                     amount: Balance;
                     memo: Memo;
                 };
+
+    public type EventPromote =  {
+                    payment_token: FTokenId;
+                    created: Timestamp;
+                    user: AccountIdentifier;
+                    amount: Balance;
+                    location: Nat64;
+                    target: EventPromoteTarget;
+                };
+
+    public type EventPromoteTarget = {
+                    #nft: TokenIdentifier
+                };
+    // new
+
+     public module FtEvent = {
+        public func hash(e : FtEvent) : [Nat8] {
+             switch (e) {
+                case (#transfer({token;from;to;amount;memo;created})) {
+                    Array.flatten<Nat8>([
+                        [9:Nat8],
+                        Blob_.nat64ToBytes(token),
+                        Blob_.intToBytes(created),
+                        Blob.toArray(from),
+                        Blob.toArray(to),
+                        Blob_.nat64ToBytes(amount),
+                        Blob.toArray(memo)
+                    ])
+                };
+                
+                case (#mint({token;created;user;amount})) {
+                    Array.flatten<Nat8>([
+                        [10:Nat8],
+                        Blob_.nat64ToBytes(token),
+                        Blob_.intToBytes(created),
+                        Blob.toArray(user),
+                        Blob_.nat64ToBytes(amount),
+                    ])
+                };
+                case (#burn({token;user;amount;memo;created})) {
+                    Array.flatten<Nat8>([
+                        [11:Nat8],
+                        Blob_.nat64ToBytes(token),
+                        Blob_.intToBytes(created),
+                        Blob.toArray(user),
+                        Blob_.nat64ToBytes(amount),
+                        Blob.toArray(memo)
+                    ])
+                };
+                case (#register({token;cost;user;created})) {
+                    Array.flatten<Nat8>([
+                        [12:Nat8],
+                        Blob_.nat64ToBytes(token),
+                        Blob_.intToBytes(created),
+                        Blob.toArray(user),
+                        Blob_.nat64ToBytes(cost),
+                    ])
+                };
+                case (#promote({payment_token;created;user;amount})) {
+                    Array.flatten<Nat8>([
+                        [13:Nat8],
+                        Blob_.nat64ToBytes(payment_token),
+                        Blob_.intToBytes(created),
+                        Blob.toArray(user),
+                        Blob_.nat64ToBytes(amount)
+                    ])
+                };
+             }
+        }
+    };
+
+    public type FtTransaction = {
+                    token: FTokenId;
+                    created: Timestamp;
+                    from: AccountIdentifier;
+                    to: AccountIdentifier;
+                    amount: Balance;
+                    memo: Memo;
+                };
+
+    public type FtRegister = {
+                    token: FTokenId;
+                    created: Timestamp;
+                    user: AccountIdentifier;
+                    cost: Balance;
+                };
+
+    public type FtBurn = {
+                    token: FTokenId;
+                    created: Timestamp;
+                    user: AccountIdentifier;
+                    amount: Balance;
+                    memo: Memo;
+                };
+
+    public type FtMint = {
+                    token: FTokenId;
+                    created: Timestamp;
+                    user: AccountIdentifier;
+                    amount: Balance;
+                };
+
 
     public type Block = {
         events: [Event]
